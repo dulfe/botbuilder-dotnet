@@ -17,6 +17,11 @@ namespace Microsoft.Bot.Builder.Dialogs.Adaptive
     public static class TemplatesRegisterExtensions
     {
         /// <summary>
+        /// Function name of missing properties of a certain template.
+        /// </summary>
+        public const string MissingPropertiesKey = "missingProperties";
+
+        /// <summary>
         /// Register Template functions.
         /// </summary>
         /// <param name="dialogContext">Dialog context.</param>
@@ -30,7 +35,16 @@ namespace Microsoft.Bot.Builder.Dialogs.Adaptive
             foreach (var templateName in templateNames)
             {
                 var functionType = prebuildFunctionNames.Contains(templateName) ? "lg." + templateName : templateName;
-                Expression.Functions.Add(functionType, new ExpressionEvaluator(
+                Expression.Functions.Add(functionType, RegisterTemplateEvaluator(lgm, functionType, templateName));
+            }
+
+            // register missingProperties
+            Expression.Functions.Add(MissingPropertiesKey, RegisterMissingPropertiesEvaluator(lgm));
+        }
+
+        private static ExpressionEvaluator RegisterTemplateEvaluator(LanguageGeneratorManager lgm, string functionType, string templateName)
+        {
+            return new ExpressionEvaluator(
                     functionType,
                     (expression, state, options) =>
                     {
@@ -85,8 +99,70 @@ namespace Microsoft.Bot.Builder.Dialogs.Adaptive
                         }
 
                         throw new Exception($"{templateName} does not have an evaluator");
-                    }));
-            }
+                    });
+        }
+
+        private static ExpressionEvaluator RegisterMissingPropertiesEvaluator(LanguageGeneratorManager lgm)
+        {
+            return new ExpressionEvaluator(
+                   MissingPropertiesKey,
+                   (expression, state, options) =>
+                   {
+                       var (args, error) = FunctionUtils.EvaluateChildren(expression, state, options);
+                       if (error != null)
+                       {
+                           return (null, error);
+                       }
+
+                       var templateName = args[0]?.ToString();
+                       var currentLocale = GetCurrentLocale(state, options);
+
+                       if (state.TryGetValue(AdaptiveDialog.GeneratorIdKey, out var resourceId))
+                       {
+                           var (resourceName, locale) = LGResourceLoader.ParseLGFileName(resourceId.ToString());
+
+                           var languagePolicy = GetLanguagePolicy(state);
+
+                           var fallbackLocales = GetFallbackLocales(languagePolicy, currentLocale);
+
+                           var generators = new List<LanguageGenerator>();
+                           generators.AddRange(GetGenerators(lgm.LanguageGenerators, fallbackLocales, resourceName + ".lg"));
+
+                           if (!string.IsNullOrEmpty(locale))
+                           {
+                               generators.AddRange(GetGenerators(lgm.LanguageGenerators, fallbackLocales, resourceId.ToString()));
+                           }
+
+                           foreach (var generator in generators)
+                           {
+                               if (generator is TemplateEngineLanguageGenerator templateGenerator)
+                               {
+                                   if (templateGenerator.LG.AllTemplates.Any(u => u.Name == templateName))
+                                   {
+                                       var analyzerResults = templateGenerator.LG.AnalyzeTemplate(templateName);
+                                       return (analyzerResults.Variables, null);
+                                   }
+
+                                   // Alias inject
+                                   var pointIndex = templateName.IndexOf('.');
+                                   if (pointIndex > 0)
+                                   {
+                                       var alias = templateName.Substring(0, pointIndex);
+                                       if (templateGenerator.LG.NamedReferences.ContainsKey(alias))
+                                       {
+                                           var realTemplateName = templateName.Substring(pointIndex + 1);
+                                           var analyzerResults = templateGenerator.LG.NamedReferences[alias].AnalyzeTemplate(realTemplateName);
+                                           return (analyzerResults.Variables, null);
+                                       }
+                                   }
+                               }
+                           }
+                       }
+
+                       return (new List<string>(), null);
+                   },
+                   ReturnType.Array,
+                   FunctionUtils.ValidateUnaryString);
         }
 
         private static List<LanguageGenerator> GetGenerators(ConcurrentDictionary<string, LanguageGenerator> generators, List<string> fallbackLocales, string resourceId)
