@@ -165,6 +165,8 @@ namespace Microsoft.Bot.Builder.Adapters.Slack
                 return null;
             }
 
+            var isEphemeral = !string.IsNullOrWhiteSpace(message.Ephemeral);
+
             var data = new NameValueCollection
             {
                 ["token"] = Options.SlackBotToken,
@@ -172,6 +174,11 @@ namespace Microsoft.Bot.Builder.Adapters.Slack
                 ["text"] = message.Text,
                 ["thread_ts"] = message.ThreadTs,
             };
+
+            if (isEphemeral)
+            {
+                data["user"] = message.User;
+            }
 
             if (message.Blocks != null)
             {
@@ -184,7 +191,7 @@ namespace Microsoft.Bot.Builder.Adapters.Slack
             byte[] response;
             using (var client = new WebClient())
             {
-                var url = !string.IsNullOrWhiteSpace(message.Ephemeral)
+                var url = isEphemeral
                     ? PostEphemeralMessageUrl
                     : PostMessageUrl;
 
