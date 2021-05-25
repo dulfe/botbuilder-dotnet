@@ -83,6 +83,13 @@ namespace Microsoft.Bot.Builder.Adapters.Slack
                 message.ThreadTs = activity.Conversation.Properties["thread_ts"].ToString();
             }
 
+            // Ephemeral?
+            if (activity.DeliveryMode == DeliveryModes.Ephemeral)
+            {
+                // Why is Ephemeral string?
+                message.Ephemeral = true.ToString();
+            }
+
             // if channelData is specified, overwrite any fields in message object
             if (activity.ChannelData != null)
             {
@@ -281,7 +288,7 @@ namespace Microsoft.Bot.Builder.Adapters.Slack
                             }
 
                             attachments.Add(new Attachment
-                            { 
+                            {
                                 ContentType = contentType,
                                 ContentUrl = contentUrl,
                                 Name = name
